@@ -11,8 +11,7 @@
     
 <style>
 
-
-
+   
 /* ==========================================================================
    NETFLIX CLONE - COMPLETE & FINAL STYLESHEET
    ========================================================================== */
@@ -109,7 +108,7 @@ a { color: inherit; text-decoration: none; }
    4. HERO BANNER
    ========================================================================== */
 .hero-banner {
-    height: 75vh; background-size: cover;
+    height: 95vh; background-size: cover;
     background-position: center 20%;
     position: relative; display: flex; align-items: center;
 }
@@ -459,6 +458,64 @@ a { color: inherit; text-decoration: none; }
     .cast-list { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
     .cast-img { max-width: 180px; }
 }
+
+.row-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-right: var(--padding-x);
+    margin-bottom: 1.5rem;
+}
+
+.row-title {
+    margin-bottom: 0; /* Remove margin as it's now on the header */
+}
+
+.view-more-link {
+    color: var(--secondary-text);
+    font-weight: var(--font-weight-bold);
+    font-size: 0.9rem;
+    opacity: 0;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.movie-row-wrapper:hover .view-more-link {
+    opacity: 1;
+}
+
+.view-more-link:hover {
+    color: var(--primary-text);
+    text-decoration: underline;
+}
+
+.view-more-link i {
+    font-size: 0.7rem;
+    vertical-align: middle;
+    margin-left: 0.25rem;
+}
+
+.category-view {
+    padding: 2rem;
+    margin-top: 2rem;
+}
+
+.category-title {
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: var(--font-weight-black);
+    margin-bottom: 2rem;
+    border-left: 5px solid var(--brand-red);
+    padding-left: 1.5rem;
+}
+
+/* Ensure skeleton cards have the correct aspect ratio in the grid */
+.grid-container .backdrop-card.skeleton {
+    aspect-ratio: 16 / 9;
+}
+
+#load-more-container {
+    padding: 2rem 0;
+}
 </style>
 
 </head>
@@ -609,6 +666,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'mylist': await this.renderMyListPage(); break;
                 case 'cast': await this.renderCastDetailsPage(param1); break;
                 case 'genre': await this.renderGenrePage(param1, param2); break;
+                case 'category': await this.renderCategoryPage(param1); break;
                 default: location.hash = '/home'; break;
             }
         },
@@ -731,8 +789,109 @@ document.addEventListener('DOMContentLoaded', () => {
     this.dom.appContainer.appendChild(pageContainer);
 },
 
+        async renderCategoryPage(encodedEndpoint) {
+    const endpoint = decodeURIComponent(encodedEndpoint);
+    const rowConfig = this.config.ROW_CONFIG.find(r => r.endpoint === endpoint);
+    const title = rowConfig ? rowConfig.title : 'Category';
+
+    // --- Render Initial Page Structure with Skeleton Loader ---
+    let skeletonGridHTML = '';
+    for (let i = 0; i < 20; i++) {
+        skeletonGridHTML += '<div class="backdrop-card skeleton"></div>';
+    }
+    this.render(`
+        <div class="category-view view">
+            <h1 class="category-title">${title}</h1>
+            <div id="category-grid" class="grid-container">
+                ${skeletonGridHTML}
+            </div>
+            <div id="load-more-container" class="text-center mt-5"></div>
+        </div>
+    `);
+
+    const gridContainer = document.getElementById('category-grid');
+    const loadMoreContainer = document.getElementById('load-more-container');
+    let currentPage = 1;
+    let isLoading = false; // Flag to prevent multiple clicks while loading
+
+    // --- Create a Reusable Function to Fetch and Render a Page ---
+    const loadPage = async (page) => {
+        const separator = endpoint.includes('?') ? '&' : '?';
+        const fullEndpoint = `${endpoint}${separator}page=${page}`;
         
+        const data = await this.api.fetchTMDB(fullEndpoint);
+
+        if (!data?.results || data.results.length === 0) {
+            if (page === 1) {
+                gridContainer.innerHTML = `<p class="text-center fs-4">No content found in this category.</p>`;
+            }
+            loadMoreContainer.innerHTML = ''; // No more pages to load
+            return false;
+        }
+
+        const forceMediaType = endpoint.includes('/movie') ? 'movie' : endpoint.includes('/tv') ? 'tv' : null;
+
+        // --- THIS IS THE CORE FIX ---
+        // Create live DOM elements and append them one by one.
+        
+        if (page === 1) {
+            gridContainer.innerHTML = ''; // Clear the skeletons
+        }
+
+        data.results.forEach(item => {
+            if (item.backdrop_path) {
+                const mediaType = forceMediaType || item.media_type || (item.title ? 'movie' : 'tv');
+                // createBackdropCard returns a live element with listeners.
+                // We append it directly to the container.
+                gridContainer.appendChild(this.ui.createBackdropCard(item, mediaType));
+            }
+        });
+
+        return data.total_pages > page; // Check if more pages exist
+    };
     
+    // --- Initial Load ---
+    const hasMorePages = await loadPage(currentPage);
+
+    // --- "Load More" Button Logic ---
+    if (hasMorePages) {
+        const loadMoreBtn = document.createElement('button');
+        loadMoreBtn.className = 'btn btn-outline-light btn-lg';
+        loadMoreBtn.textContent = 'Load More';
+        loadMoreContainer.appendChild(loadMoreBtn);
+
+        loadMoreBtn.addEventListener('click', async () => {
+            if (isLoading) return; // Prevent double-clicking
+            isLoading = true;
+            
+            currentPage++;
+            loadMoreBtn.style.display = 'none';
+
+            // Show skeleton loaders while fetching
+            const skeletonWrapper = document.createElement('div');
+            skeletonWrapper.className = 'loading-skeletons'; // Wrapper to easily remove them
+            let skeletonLoadersHTML = '';
+            for (let i = 0; i < 10; i++) {
+                skeletonLoadersHTML += '<div class="backdrop-card skeleton"></div>';
+            }
+            skeletonWrapper.innerHTML = skeletonLoadersHTML;
+            gridContainer.appendChild(skeletonWrapper);
+
+            const morePagesExist = await loadPage(currentPage);
+            
+            // Remove skeleton loaders
+            skeletonWrapper.remove();
+            
+            if (morePagesExist) {
+                loadMoreBtn.style.display = 'inline-block';
+            } else {
+                loadMoreContainer.innerHTML = '';
+            }
+            isLoading = false;
+        });
+    }
+},
+ 
 
        async renderCastDetailsPage(castId) {
             this.render('<div class="d-flex justify-content-center align-items-center vh-100"><div class="spinner-border text-danger" role="status"></div></div>');
@@ -820,7 +979,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div></div></div><div class="hero-fade position-absolute bottom-0 start-0 w-100"></div>`;
             },
 
-            createMovieRow(config, items, forceMediaType = null) {
+            /*createMovieRow(config, items, forceMediaType = null) {
                 const rowWrapper = document.createElement('div');
                 rowWrapper.className = 'movie-row-wrapper';
                 rowWrapper.innerHTML = `
@@ -851,7 +1010,55 @@ document.addEventListener('DOMContentLoaded', () => {
                 leftArrow.onclick = () => postersContainer.scrollBy({ left: -postersContainer.clientWidth * 0.9, behavior: 'smooth' });
                 rightArrow.onclick = () => postersContainer.scrollBy({ left: postersContainer.clientWidth * 0.9, behavior: 'smooth' });
                 return rowWrapper;
-            },
+            },*/
+
+            createMovieRow(config, items, forceMediaType = null) {
+    const rowWrapper = document.createElement('div');
+    rowWrapper.className = 'movie-row-wrapper';
+
+    // Build the URL for the "View More" link
+    // We'll encode the endpoint URL to safely pass it in the hash
+    const viewMoreUrl = `#/category/${encodeURIComponent(config.endpoint)}`;
+
+    // Add the "View More" link next to the title
+    rowWrapper.innerHTML = `
+        <div class="row-header">
+            <h2 class="row-title">${config.title}</h2>
+            <a href="${viewMoreUrl}" class="view-more-link">View More <i class="fas fa-chevron-right"></i></a>
+        </div>
+        <div class="position-relative">
+            <div class="slider-arrow left"><i class="fas fa-chevron-left"></i></div>
+            <div class="posters-container"></div>
+            <div class="slider-arrow right"><i class="fas fa-chevron-right"></i></div>
+        </div>
+    `;
+
+    const postersContainer = rowWrapper.querySelector('.posters-container');
+    const leftArrow = rowWrapper.querySelector('.slider-arrow.left');
+    const rightArrow = rowWrapper.querySelector('.slider-arrow.right');
+
+    if (config.title === 'Trending Now') {
+        postersContainer.classList.add('poster-row');
+    }
+
+    // Limit the number of items shown on the homepage row
+    const itemsToShow = items.slice(0, 20);
+
+    itemsToShow.forEach((item, index) => {
+        const itemMediaType = forceMediaType || item.media_type || (item.title ? 'movie' : 'tv');
+        if (config.title === 'Trending Now' && item.poster_path) {
+            postersContainer.appendChild(this.createPosterCard(item, index, itemMediaType));
+        } else if (item.backdrop_path) {
+            postersContainer.appendChild(this.createBackdropCard(item, itemMediaType));
+        }
+    });
+
+    leftArrow.onclick = () => postersContainer.scrollBy({ left: -postersContainer.clientWidth * 0.9, behavior: 'smooth' });
+    rightArrow.onclick = () => postersContainer.scrollBy({ left: postersContainer.clientWidth * 0.9, behavior: 'smooth' });
+
+    return rowWrapper;
+},
+
 
             createPosterCard(item, index, mediaType) {
                 const cardWrapper = document.createElement('div');
